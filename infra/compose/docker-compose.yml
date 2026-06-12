@@ -1,0 +1,29 @@
+services:
+  backend:
+    image: python:3.11-slim
+    working_dir: /app
+    command: sh -c "pip install -r requirements.txt && uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ../../:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    volumes:
+      - ../../frontend:/app
+    ports:
+      - "3000:3000"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vpn
+      POSTGRES_USER: vpn
+      POSTGRES_PASSWORD: vpn
+    ports:
+      - "5432:5432"
