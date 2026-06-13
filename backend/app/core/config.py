@@ -24,6 +24,18 @@ class Settings(BaseModel):
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
+    # WireGuard configurations
+    wireguard_endpoint: str = os.getenv("WIREGUARD_ENDPOINT", "vpn.example.local:51820")
+    wireguard_server_public_key: str = os.getenv("WIREGUARD_SERVER_PUBLIC_KEY", "hElLoWgSeRvErPuBlIcKeYdEmO1234567890abcdefg=")
+    wireguard_dns: str = os.getenv("WIREGUARD_DNS", "1.1.1.1")
+    wireguard_allowed_ips: str = os.getenv("WIREGUARD_ALLOWED_IPS", "0.0.0.0/0, ::/0")
+    vpn_subnet_prefix: str = os.getenv("VPN_SUBNET_PREFIX", "10.8.0")
+
+    # Threat detection parameters
+    brute_force_threshold: int = int(os.getenv("BRUTE_FORCE_THRESHOLD", "5"))
+    brute_force_window_minutes: int = int(os.getenv("BRUTE_FORCE_WINDOW_MINUTES", "15"))
+    traffic_spike_bytes: int = int(os.getenv("TRAFFIC_SPIKE_BYTES", str(5 * 1024 * 1024 * 1024)))
+
     def __init__(self, **data):
         super().__init__(**data)
         secret = os.getenv("JWT_SECRET")

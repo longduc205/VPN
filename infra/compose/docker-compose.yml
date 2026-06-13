@@ -13,6 +13,9 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app/backend
       - DATABASE_URL=postgresql://vpn:vpn@postgres:5432/vpn
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   frontend:
     image: node:20-alpine
@@ -31,3 +34,9 @@ services:
       POSTGRES_PASSWORD: vpn
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpn -d vpn"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s

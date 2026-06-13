@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         admin_user = db.query(User).filter(User.role == "admin").first()
         if not admin_user:
             logger.warning("No admin user found. Seeding default admin account...")
-            default_pwd = "AdminSecurePass123!"
+            default_pwd = "admin"
             hashed_pwd = get_password_hash(default_pwd)
             new_admin = User(
                 username="admin",
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
             logger.warning("==========================================================")
             logger.warning("Seeded default Admin:")
             logger.warning("  Username: admin")
-            logger.warning("  Password: AdminSecurePass123!")
+            logger.warning("  Password: admin")
             logger.warning("  PLEASE CHANGE THIS PASSWORD IMMEDIATELY ON FIRST LOGIN!")
             logger.warning("==========================================================")
     except Exception as e:

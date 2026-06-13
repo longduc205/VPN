@@ -10,6 +10,11 @@ from app.models.user import User
 from app.modules.auth.helpers import get_password_hash, verify_password, create_access_token, verify_token
 
 # Setup in-memory SQLite database with StaticPool to share connection across threads
+@pytest.fixture(autouse=True)
+def clear_rate_limit():
+    from app.modules.auth.router import LOGIN_ATTEMPTS
+    LOGIN_ATTEMPTS.clear()
+
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
@@ -119,3 +124,119 @@ def test_protected_routes(client, db_session):
     assert me_resp.status_code == 200
     assert me_resp.json()["username"] == "adminuser"
     assert me_resp.json()["role"] == "admin"
+
+
+def test_totp_verification():
+    import time
+    from app.modules.auth.mfa import generate_mfa_secret, get_hotp_token, verify_totp_token
+    # Generate secret
+    secret = generate_mfa_secret()
+    assert len(secret) == 32
+    
+    # Calculate current step token
+    current_step = int(time.time() / 30)
+    token = get_hotp_token(secret, current_step)
+    assert len(token) == 6
+    assert token.isdigit()
+    
+    # Verify correct token
+    assert verify_totp_token(secret, token) is True
+    
+    # Verify incorrect token
+    assert verify_totp_token(secret, "000000") is False
+    assert verify_totp_token(secret, "123456") is False
+    
+    # Verify time drift window
+    past_token = get_hotp_token(secret, current_step - 1)
+    future_token = get_hotp_token(secret, current_step + 1)
+    
+    # Drift window of 1 allows past and future tokens
+    assert verify_totp_token(secret, past_token, window=1) is True
+    assert verify_totp_token(secret, future_token, window=1) is True
+
+
+def test_mfa_enrollment_and_login_flow(client, db_session):
+    import time
+    from app.modules.auth.mfa import get_hotp_token
+    # 1. Create a user
+    user = User(
+        username="mfauser",
+        hashed_password=get_password_hash("MfaSecurePassword123!"),
+        role="user",
+        is_active=True
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    # 2. Login to get session cookie for enrollment
+    login_resp = client.post("/api/auth/login", json={
+        "username": "mfauser",
+        "password": "MfaSecurePassword123!"
+    })
+    assert login_resp.status_code == 200
+    
+    # 3. Request 2FA enrollment
+    enroll_resp = client.post("/api/auth/mfa/enroll")
+    assert enroll_resp.status_code == 200
+    enroll_data = enroll_resp.json()
+    assert "secret" in enroll_data
+    assert "provisioning_uri" in enroll_data
+    secret = enroll_data["secret"]
+    
+    # 4. Try verifying with wrong code -> 400
+    verify_resp_wrong = client.post("/api/auth/mfa/verify", json={"code": "000000"})
+    assert verify_resp_wrong.status_code == 400
+    
+    # 5. Verify with correct current code -> 200
+    current_step = int(time.time() / 30)
+    correct_token = get_hotp_token(secret, current_step)
+    verify_resp = client.post("/api/auth/mfa/verify", json={"code": correct_token})
+    assert verify_resp.status_code == 200
+    
+    # 6. Log out to clear session
+    logout_resp = client.post("/api/auth/logout")
+    assert logout_resp.status_code == 200
+    
+    # Clear client cookies to simulate clean login request
+    client.cookies.clear()
+    
+    # 7. Log in again with password -> Should require MFA
+    login_resp_2 = client.post("/api/auth/login", json={
+        "username": "mfauser",
+        "password": "MfaSecurePassword123!"
+    })
+    assert login_resp_2.status_code == 200
+    assert login_resp_2.json()["status"] == "mfa_required"
+    assert "session_token" not in client.cookies
+    
+    # 8. Post MFA code to complete login
+    mfa_step = int(time.time() / 30)
+    current_mfa_token = get_hotp_token(secret, mfa_step)
+    mfa_login_resp = client.post("/api/auth/login/mfa", json={
+        "username": "mfauser",
+        "code": current_mfa_token
+    })
+    assert mfa_login_resp.status_code == 200
+    assert mfa_login_resp.json()["username"] == "mfauser"
+    assert "session_token" in client.cookies or "__Host-session" in client.cookies
+    
+    # 9. Verify protected routes are now accessible
+    me_resp = client.get("/api/auth/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["username"] == "mfauser"
+    
+    # 10. Disable MFA
+    disable_resp = client.post("/api/auth/mfa/disable")
+    assert disable_resp.status_code == 200
+    
+    # Logout & login without MFA
+    client.post("/api/auth/logout")
+    client.cookies.clear()
+    
+    login_resp_no_mfa = client.post("/api/auth/login", json={
+        "username": "mfauser",
+        "password": "MfaSecurePassword123!"
+    })
+    assert login_resp_no_mfa.status_code == 200
+    assert "status" not in login_resp_no_mfa.json()
+    assert "session_token" in client.cookies or "__Host-session" in client.cookies
